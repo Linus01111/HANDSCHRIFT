@@ -137,11 +137,25 @@ details[open] summary{margin-bottom:10px}
 .free-tiles button{padding:0;border:1px solid var(--line);border-radius:8px;background:#fff;position:relative;line-height:0}
 .free-tiles button span{position:absolute;top:3px;left:5px;font-size:10px;line-height:1;color:#7a8190}
 .free-tiles button.off{opacity:.3;box-shadow:0 0 0 2px var(--warn)}
+.splash{position:fixed;inset:0;z-index:100;background:rgba(10,12,18,.92);display:grid;place-items:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.splash-box{position:relative;display:grid;gap:14px;justify-items:center;max-width:min(1000px,100%)}
+.splash img{display:block;width:auto;height:auto;object-fit:contain;max-width:100%;max-height:calc(100vh - 120px);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.splash-x{position:absolute;top:10px;right:10px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:22px;line-height:44px;padding:0}
+.splash-go{border:0;border-radius:999px;background:var(--ink);color:var(--ink-fg);font-weight:600;padding:12px 28px;font-size:1rem}
+body.locked{overflow:hidden}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
 </head>
 <body>
+<div class="splash" id="splash" role="dialog" aria-modal="true" aria-label="Startbild">
+  <div class="splash-box">
+    <img src="splash.jpg" alt="Startbild" width="1600" height="1200">
+    <button class="splash-x" id="splashX" aria-label="Bild schließen">×</button>
+    <button class="splash-go" id="splashGo">Weiter zur App</button>
+  </div>
+</div>
 <div class="wrap">
   <header class="top">
     <h1>Handschrift-Generator</h1>
@@ -1702,6 +1716,17 @@ initDb();
 })();
 </script>
 
+<script>
+(() => {
+  const sp = document.getElementById("splash"), wrap = document.querySelector(".wrap");
+  document.body.classList.add("locked"); wrap.setAttribute("inert", "");
+  const close = () => { sp.hidden = true; document.body.classList.remove("locked"); wrap.removeAttribute("inert"); };
+  document.getElementById("splashGo").onclick = close;
+  document.getElementById("splashX").onclick = close;
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && !sp.hidden) close(); });
+  setTimeout(() => document.getElementById("splashGo").focus(), 50);
+})();
+</script>
 <script>if("serviceWorker" in navigator) addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));</script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 // Offline-Cache: zuerst Netz (damit Updates sofort ankommen), sonst Cache.
-const CACHE = "handschrift-v5";
-const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "gn-__init__.py", "gn-lz4_block.py", "gn-model.py", "gn-paper.py"];
+const CACHE = "handschrift-v6";
+const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "splash.jpg", "gn-__init__.py", "gn-lz4_block.py", "gn-model.py", "gn-paper.py"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener("fetch", e => {
