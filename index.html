@@ -122,6 +122,10 @@ select{border:1px solid var(--line);border-radius:8px;background:var(--bg);paddi
 details summary{cursor:pointer;font-weight:600}
 details[open] summary{margin-bottom:10px}
 .foot{margin-top:32px;font-size:.8rem;color:var(--muted)}.foot a{color:var(--ink)}
+.learn{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;gap:12px}
+.learn-text{margin:0;max-width:75ch;font-size:.92rem}
+.tpl-result{display:grid;gap:10px}
+#tplPreview{width:100%;max-width:640px;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -143,6 +147,23 @@ details[open] summary{margin-bottom:10px}
       <span class="lbl" id="progText">0 von 0 Zeichen</span>
       <div class="bar"><i id="progBar"></i></div>
     </div>
+    <section class="learn" aria-label="Aus Foto lernen">
+      <p class="learn-text"><b>Keine Lust, jeden Buchstaben einzeln zu zeichnen?</b> Lade die Vorlage, schreib jedes Zeichen in sein Kästchen (auf Papier oder in GoodNotes) und lad ein Foto davon hoch. Wer die Vorlage zwei- oder dreimal ausfüllt, bekommt mehr Varianten.</p>
+      <div class="row">
+        <button class="btn" id="tplGet">Vorlage (PDF)</button>
+        <label class="btn primary" for="tplFile" style="display:inline-block">Foto hochladen</label>
+        <input type="file" id="tplFile" accept="image/*,application/pdf" hidden>
+      </div>
+      <p class="msg" id="tplMsg" hidden></p>
+      <div id="tplResult" class="tpl-result" hidden>
+        <canvas id="tplPreview" aria-label="Erkannte Zeichen"></canvas>
+        <div class="row">
+          <select id="tplMode" style="width:auto"><option value="add">Als weitere Variante hinzufügen</option><option value="replace">Vorhandene Zeichen ersetzen</option></select>
+          <button class="btn primary" id="tplApply">Übernehmen</button>
+          <button class="btn" id="tplCancel">Verwerfen</button>
+        </div>
+      </div>
+    </section>
     <div class="groups" id="groups"></div>
     <div class="chips" id="chips"></div>
 
@@ -948,6 +969,341 @@ document.getElementById("bkFile").addEventListener("change", e => {
   const f = e.target.files[0]; if(!f) return;
   const r = new FileReader(); r.onload = () => loadBackup(r.result); r.readAsText(f); e.target.value = "";
 });
+
+/* ================= Aus Foto lernen (Vorlage) ================= */
+// Vorlage: A4, 10 x 10 Kästchen à 52 pt, vier schwarze Passmarken um das Raster.
+const TPL = (() => {
+  const W = 595.28, H = 841.89, c = 52, cols = 10, rows = Math.ceil(ALL.length / 10);
+  const L = (W - c * cols) / 2, T = 170, R = L + c * cols, B = T + c * rows, o = 16;
+  return {W, H, c, cols, rows, L, T, R, B, fid: [[L - o, T - o], [R + o, T - o], [R + o, B + o], [L - o, B + o]]};
+})();
+function tplCell(i){ return [TPL.L + (i % TPL.cols) * TPL.c, TPL.T + Math.floor(i / TPL.cols) * TPL.c]; }
+
+function pdfStr(t){
+  let s = "";
+  for(const ch of t){ let b = String.fromCharCode(winByte(ch)); if(b === "(" || b === ")" || b === "\\") b = "\\" + b; s += b; }
+  return "(" + s + ")";
+}
+function makeTemplatePdf(){
+  const {W, H, c} = TPL, Y = y => n2(H - y), out = [];
+  const text = (x, y, size, t, bold, gray) => out.push("BT /" + (bold ? "F2" : "F1") + " " + size + " Tf " + (gray || 0) + " g 1 0 0 1 " + n2(x) + " " + Y(y) + " Tm " + pdfStr(t) + " Tj ET");
+  text(TPL.L, 62, 18, "Handschrift-Vorlage", true);
+  [
+    "Schreib jedes Zeichen einmal in sein Kästchen: auf der durchgezogenen blauen Linie stehen,",
+    "kleine Buchstaben reichen bis zur mittleren gestrichelten Linie, Großbuchstaben bis zur oberen.",
+    "Dann fotografieren (gerade von oben, gut beleuchtet) oder in GoodNotes als Bild exportieren",
+    "und im Generator unter „Zeichnen“ hochladen. Die vier schwarzen Quadrate nicht verdecken."
+  ].forEach((t, i) => text(TPL.L, 86 + i * 13, 9.5, t, false, 0.25));
+  out.push("0 g");
+  TPL.fid.forEach(([x, y]) => out.push(n2(x - 8) + " " + Y(y + 8) + " 16 16 re f"));
+  const hl = (x, y, dash, rgb, w) => out.push((dash ? "[2 2] 0 d " : "[] 0 d ") + rgb + " RG " + w + " w " + n2(x + 1) + " " + Y(y) + " m " + n2(x + c - 1) + " " + Y(y) + " l S");
+  ALL.forEach((ch, i) => {
+    const [x, y] = tplCell(i);
+    out.push("[] 0 d 0.82 0.83 0.86 RG 0.6 w " + n2(x) + " " + Y(y + c) + " " + n2(c) + " " + n2(c) + " re S");
+    hl(x, y + c * G.cap / 1000, true, "0.80 0.87 1", 0.5);
+    hl(x, y + c * G.xh / 1000, true, "0.80 0.87 1", 0.5);
+    hl(x, y + c * G.base / 1000, false, "0.68 0.80 1", 0.9);
+    hl(x, y + c * G.desc / 1000, true, "0.80 0.87 1", 0.5);
+    text(x + 2.5, y + 8, 7, ch, false, 0.72);
+  });
+  text(TPL.L, TPL.fid[2][1] + 30, 8, "Handschrift-Generator · Vorlage 1 · Mehrmals ausfüllen ergibt mehr Varianten.", false, 0.5);
+  const s = out.join("\n") + "\n";
+  const objs = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + n2(W) + " " + n2(H) + "] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>",
+    "<< /Length " + s.length + " >>\nstream\n" + s + "endstream",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>"
+  ];
+  let pdf = "%PDF-1.4\n"; const offs = [];
+  objs.forEach((o, i) => { offs.push(pdf.length); pdf += (i + 1) + " 0 obj\n" + o + "\nendobj\n"; });
+  const x = pdf.length;
+  pdf += "xref\n0 " + (objs.length + 1) + "\n0000000000 65535 f \n" + offs.map(v => String(v).padStart(10, "0") + " 00000 n \n").join("");
+  pdf += "trailer\n<< /Size " + (objs.length + 1) + " /Root 1 0 R >>\nstartxref\n" + x + "\n%%EOF";
+  const bytes = new Uint8Array(pdf.length);
+  for(let i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 255;
+  return bytes;
+}
+
+/* ---- Bild laden ---- */
+function loadScriptOnce(src){
+  return new Promise((ok, no) => {
+    if(document.querySelector('script[src="' + src + '"]')) return ok();
+    const t = document.createElement("script"); t.src = src; t.onload = ok; t.onerror = () => no(new Error("load")); document.head.appendChild(t);
+  });
+}
+async function fileToGray(file){
+  let source, w, h;
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  if(isPdf){
+    await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+    await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js");
+    const doc = await pdfjsLib.getDocument({data: new Uint8Array(await file.arrayBuffer())}).promise;
+    const page = await doc.getPage(1);
+    const vp0 = page.getViewport({scale: 1});
+    const vp = page.getViewport({scale: 2200 / Math.max(vp0.width, vp0.height)});
+    const cv = document.createElement("canvas"); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, cv.width, cv.height);
+    await page.render({canvasContext: cx, viewport: vp}).promise;
+    source = cv; w = cv.width; h = cv.height;
+  } else {
+    const url = URL.createObjectURL(file);
+    try{
+      source = await new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => no(new Error("img")); im.src = url; });
+    } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    w = source.naturalWidth; h = source.naturalHeight;
+  }
+  const sc = Math.min(1, 2600 / Math.max(w, h));
+  const W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const cx = cv.getContext("2d"); cx.fillStyle = "#fff"; cx.fillRect(0, 0, W, H); cx.drawImage(source, 0, 0, W, H);
+  const d = cx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H);
+  for(let i = 0, j = 0; j < g.length; i += 4, j++) g[j] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+  return {g, W, H};
+}
+
+/* ---- Passmarken finden ---- */
+function findFiducials(img){
+  const s = Math.min(1, 1000 / Math.max(img.W, img.H));
+  const w = Math.round(img.W * s), h = Math.round(img.H * s), small = new Uint8Array(w * h);
+  for(let y = 0; y < h; y++) for(let x = 0; x < w; x++) small[y * w + x] = img.g[Math.min(img.H - 1, Math.floor(y / s)) * img.W + Math.min(img.W - 1, Math.floor(x / s))];
+  // Otsu
+  const hist = new Array(256).fill(0); small.forEach(v => hist[v]++);
+  let sum = 0; for(let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, thr = 128;
+  for(let t = 0; t < 256; t++){ wB += hist[t]; if(!wB) continue; const wF = small.length - wB; if(!wF) break; sB += t * hist[t];
+    const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF); if(v > best){ best = v; thr = t; } }
+  thr = Math.min(thr, 110);
+  const lab = new Int32Array(w * h), comps = [], stack = [];
+  for(let i = 0; i < w * h; i++){
+    if(lab[i] || small[i] > thr) continue;
+    const id = comps.length + 1; let n = 0, x0 = w, x1 = 0, y0 = h, y1 = 0, sx = 0, sy = 0;
+    lab[i] = id; stack.push(i);
+    while(stack.length){
+      const p = stack.pop(), px = p % w, py = (p - px) / w; n++; sx += px; sy += py;
+      if(px < x0) x0 = px; if(px > x1) x1 = px; if(py < y0) y0 = py; if(py > y1) y1 = py;
+      if(px > 0 && !lab[p - 1] && small[p - 1] <= thr){ lab[p - 1] = id; stack.push(p - 1); }
+      if(px < w - 1 && !lab[p + 1] && small[p + 1] <= thr){ lab[p + 1] = id; stack.push(p + 1); }
+      if(py > 0 && !lab[p - w] && small[p - w] <= thr){ lab[p - w] = id; stack.push(p - w); }
+      if(py < h - 1 && !lab[p + w] && small[p + w] <= thr){ lab[p + w] = id; stack.push(p + w); }
+    }
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+    comps.push({n, fill: n / (bw * bh), ar: bw / bh, cx: sx / n / s, cy: sy / n / s});
+  }
+  const cand = comps.filter(c => c.fill > 0.72 && c.ar > 0.6 && c.ar < 1.65 && c.n >= w * h * 0.00004).sort((a, b) => b.n - a.n);
+  if(cand.length < 4) return null;
+  const top = cand.slice(0, 4);
+  if(top[3].n < top[0].n * 0.3) return null;
+  const by = f => top.reduce((a, b) => f(b) > f(a) ? b : a);
+  const tl = by(p => -(p.cx + p.cy)), br = by(p => p.cx + p.cy), tr = by(p => p.cx - p.cy), bl = by(p => p.cy - p.cx);
+  if(new Set([tl, tr, br, bl]).size < 4) return null;
+  return [tl, tr, br, bl].map(p => [p.cx, p.cy]);
+}
+
+/* ---- Homographie (Vorlage-pt -> Bildpixel) ---- */
+function homography(src, dst){
+  const A = [], b = [];
+  for(let i = 0; i < 4; i++){
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  for(let c = 0; c < 8; c++){
+    let p = c; for(let r = c + 1; r < 8; r++) if(Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+    for(let r = 0; r < 8; r++){ if(r === c) continue; const f = A[r][c] / A[c][c]; for(let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; }
+  }
+  const h = b.map((v, i) => v / A[i][i]);
+  return (x, y) => { const d = h[6] * x + h[7] * y + 1; return [(h[0] * x + h[1] * y + h[2]) / d, (h[3] * x + h[4] * y + h[5]) / d]; };
+}
+
+/* ---- Skelett & Striche ---- */
+function thin(m, w, h){
+  let changed = true; const del = [];
+  const at = (x, y) => (x < 0 || y < 0 || x >= w || y >= h) ? 0 : m[y * w + x];
+  while(changed){
+    changed = false;
+    for(let step = 0; step < 2; step++){
+      del.length = 0;
+      for(let y = 0; y < h; y++) for(let x = 0; x < w; x++){
+        if(!m[y * w + x]) continue;
+        const p = [at(x, y - 1), at(x + 1, y - 1), at(x + 1, y), at(x + 1, y + 1), at(x, y + 1), at(x - 1, y + 1), at(x - 1, y), at(x - 1, y - 1)];
+        const B = p.reduce((a, v) => a + v, 0); if(B < 2 || B > 6) continue;
+        let A = 0; for(let k = 0; k < 8; k++) if(!p[k] && p[(k + 1) % 8]) A++;
+        if(A !== 1) continue;
+        if(step === 0 ? (p[0] * p[2] * p[4] || p[2] * p[4] * p[6]) : (p[0] * p[2] * p[6] || p[0] * p[4] * p[6])) continue;
+        del.push(y * w + x);
+      }
+      if(del.length){ changed = true; del.forEach(i => m[i] = 0); }
+    }
+  }
+  return m;
+}
+const N8 = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+function tracePaths(sk, w, h){
+  const nbs = i => { const x = i % w, y = (i - x) / w, r = [];
+    for(const [dx, dy] of N8){ const X = x + dx, Y = y + dy; if(X >= 0 && Y >= 0 && X < w && Y < h && sk[Y * w + X]) r.push(Y * w + X); } return r; };
+  const deg = new Uint8Array(w * h);
+  for(let i = 0; i < w * h; i++) if(sk[i]) deg[i] = nbs(i).length;
+  const vis = new Uint8Array(w * h), paths = [];
+  const dirTo = (a, b) => [b % w - a % w, Math.floor(b / w) - Math.floor(a / w)];
+  const walk = start => {
+    const path = [start]; vis[start] = 1; let cur = start;
+    for(;;){
+      const cand = nbs(cur).filter(n => !vis[n]);
+      if(!cand.length){
+        // Schleife schließen / an bestehenden Strich anschließen
+        const recent = new Set(path.slice(-4));
+        const back = nbs(cur).find(n => vis[n] && !recent.has(n));
+        if(back !== undefined && path.length > 3) path.push(back);
+        break;
+      }
+      let nx = cand[0];
+      if(cand.length > 1){
+        const prev = path.length > 1 ? path[path.length - 2] : -1;
+        let best = -9;
+        cand.forEach(n => {
+          const [dx, dy] = dirTo(cur, n); let sc = (dx === 0 || dy === 0) ? 0.05 : 0;
+          if(prev >= 0){ const [vx, vy] = dirTo(prev, cur); sc += (vx * dx + vy * dy) / (Math.hypot(vx, vy) * Math.hypot(dx, dy)); }
+          if(sc > best){ best = sc; nx = n; }
+        });
+      }
+      vis[nx] = 1; path.push(nx); cur = nx;
+    }
+    return path;
+  };
+  const order = [];
+  for(let i = 0; i < w * h; i++) if(sk[i] && deg[i] <= 1) order.push(i);
+  for(let i = 0; i < w * h; i++) if(sk[i] && deg[i] > 1) order.push(i);
+  for(const s of order){
+    if(vis[s]) continue;
+    const join = nbs(s).find(n => vis[n]);
+    const p = walk(s);
+    if(join !== undefined){
+      if(p.length < 4) continue; // kurzer Ast an einer Kreuzung
+      p.unshift(join);
+    }
+    paths.push(p);
+  }
+  return paths.map(p => p.map(i => [i % w, Math.floor(i / w)]));
+}
+function rdp(pts, eps){
+  if(pts.length < 3) return pts;
+  const [a, b] = [pts[0], pts[pts.length - 1]];
+  let dmax = 0, idx = 0; const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  for(let i = 1; i < pts.length - 1; i++){
+    const d = L < 1e-6 ? Math.hypot(pts[i][0] - a[0], pts[i][1] - a[1]) : Math.abs((b[0] - a[0]) * (a[1] - pts[i][1]) - (a[0] - pts[i][0]) * (b[1] - a[1])) / L;
+    if(d > dmax){ dmax = d; idx = i; }
+  }
+  if(dmax <= eps) return [a, b];
+  return rdp(pts.slice(0, idx + 1), eps).slice(0, -1).concat(rdp(pts.slice(idx), eps));
+}
+function smooth(pts){
+  if(pts.length < 3) return pts;
+  return pts.map((p, i) => (i === 0 || i === pts.length - 1) ? p : [(pts[i - 1][0] + 2 * p[0] + pts[i + 1][0]) / 4, (pts[i - 1][1] + 2 * p[1] + pts[i + 1][1]) / 4]);
+}
+
+/* ---- Ein Kästchen auslesen ---- */
+const CPX = 140;
+function readCell(img, H, i){
+  const [x0, y0] = tplCell(i), c = TPL.c, n = CPX, gray = new Float32Array(n * n);
+  for(let y = 0; y < n; y++) for(let x = 0; x < n; x++){
+    const [u, v] = H(x0 + (x + 0.5) / n * c, y0 + (y + 0.5) / n * c);
+    const fx = Math.max(0, Math.min(img.W - 1.001, u)), fy = Math.max(0, Math.min(img.H - 1.001, v));
+    const ix = Math.floor(fx), iy = Math.floor(fy), ax = fx - ix, ay = fy - iy, g = img.g, W = img.W, k = iy * W + ix;
+    gray[y * n + x] = (g[k] * (1 - ax) + g[k + 1] * ax) * (1 - ay) + (g[k + W] * (1 - ax) + g[k + W + 1] * ax) * ay;
+  }
+  const inset = Math.round(n * 0.06), vals = [];
+  for(let y = inset; y < n - inset; y += 2) for(let x = inset; x < n - inset; x += 2) vals.push(gray[y * n + x]);
+  vals.sort((a, b) => a - b);
+  const bg = vals[Math.floor(vals.length * 0.85)];
+  let m = new Uint8Array(n * n), count = 0;
+  for(let y = inset; y < n - inset; y++) for(let x = inset; x < n - inset; x++){
+    if(x < n * 0.2 && y < n * 0.17) continue; // gedrucktes Label
+    const v = gray[y * n + x];
+    if(v < bg * 0.66 && bg - v > 45){ m[y * n + x] = 1; count++; }
+  }
+  if(count < 25) return null;
+  // kleine Flecken entfernen
+  const lab = new Int32Array(n * n), st = [];
+  for(let s = 0; s < n * n; s++){
+    if(!m[s] || lab[s]) continue;
+    const comp = []; lab[s] = 1; st.push(s);
+    while(st.length){ const p = st.pop(); comp.push(p); const px = p % n;
+      for(const [dx, dy] of N8){ const X = px + dx, q = p + dy * n + dx; if(X < 0 || X >= n || q < 0 || q >= n * n || !m[q] || lab[q]) continue; lab[q] = 1; st.push(q); } }
+    if(comp.length < 7) comp.forEach(p => m[p] = 0);
+  }
+  // Schließen (1 px), dann ausdünnen
+  const dil = new Uint8Array(n * n);
+  for(let y = 1; y < n - 1; y++) for(let x = 1; x < n - 1; x++){ let on = 0; for(const [dx, dy] of N8) if(m[(y + dy) * n + x + dx]) { on = 1; break; } dil[y * n + x] = m[y * n + x] || on; }
+  const ero = new Uint8Array(n * n);
+  for(let y = 1; y < n - 1; y++) for(let x = 1; x < n - 1; x++){ let all = dil[y * n + x]; if(all) for(const [dx, dy] of N8) if(!dil[(y + dy) * n + x + dx]) { all = 0; break; } ero[y * n + x] = all; }
+  thin(ero, n, n);
+  const k = 1000 / n;
+  const strokes = tracePaths(ero, n, n)
+    .map(p => smooth(rdp(p, 0.9)))
+    .filter(p => p.length > 1 || true)
+    .map(p => { const out = []; p.forEach(([x, y]) => out.push(Math.round((x + 0.5) * k), Math.round((y + 0.5) * k))); return out; });
+  return strokes.length ? {s: strokes} : null;
+}
+
+/* ---- Oberfläche ---- */
+let tplFound = null;
+function tplMsg(t, err){ msg("tplMsg", t, err); }
+function drawTplPreview(found){
+  const cv = document.getElementById("tplPreview"), cols = 10, cs = 60, rows = Math.ceil(ALL.length / cols);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = cols * cs * dpr; cv.height = rows * cs * dpr;
+  const x = cv.getContext("2d"); x.scale(dpr, dpr); x.fillStyle = "#fff"; x.fillRect(0, 0, cols * cs, rows * cs);
+  ALL.forEach((ch, i) => {
+    const ox = (i % cols) * cs, oy = Math.floor(i / cols) * cs, v = found[ch];
+    x.strokeStyle = "#e3e6ec"; x.lineWidth = 1; x.strokeRect(ox + 0.5, oy + 0.5, cs - 1, cs - 1);
+    x.strokeStyle = "#c7d4f5"; x.beginPath(); x.moveTo(ox, oy + cs * 0.7); x.lineTo(ox + cs, oy + cs * 0.7); x.stroke();
+    x.fillStyle = "#9aa1ad"; x.font = "9px sans-serif"; x.fillText(ch, ox + 3, oy + 10);
+    if(!v){ x.fillStyle = "rgba(200,80,40,.10)"; x.fillRect(ox + 1, oy + 1, cs - 2, cs - 2); return; }
+    x.strokeStyle = "#1b2130"; x.lineWidth = 1.4; x.lineCap = "round"; x.lineJoin = "round";
+    v.s.forEach(st => { pathFlat(x, st, ox, oy, cs / 1000); x.stroke(); });
+  });
+}
+document.getElementById("tplGet").onclick = () => offer("Handschrift-Vorlage.pdf", new Blob([makeTemplatePdf()], {type: "application/pdf"}), "tplMsg", "application/pdf");
+document.getElementById("tplFile").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if(!f) return;
+  document.getElementById("tplResult").hidden = true;
+  tplMsg("Foto wird ausgewertet …");
+  try{
+    const img = await fileToGray(f);
+    const fid = findFiducials(img);
+    if(!fid){ tplMsg("Die vier schwarzen Quadrate der Vorlage wurden nicht gefunden. Fotografier das ganze Blatt gerade von oben, ohne die Ecken abzuschneiden.", true); return; }
+    const H = homography(TPL.fid, fid);
+    const found = {}; let n = 0;
+    ALL.forEach((ch, i) => { const v = readCell(img, H, i); if(v){ found[ch] = v; n++; } });
+    if(!n){ tplMsg("In den Kästchen wurde keine Schrift erkannt. Schreib mit dunklem Stift und achte auf gutes Licht.", true); return; }
+    tplFound = found;
+    drawTplPreview(found);
+    document.getElementById("tplResult").hidden = false;
+    tplMsg(n + " von " + ALL.length + " Zeichen erkannt. Prüf die Vorschau und tippe auf „Übernehmen“.", false);
+  }catch(err){
+    console.error(err);
+    tplMsg("Die Datei konnte nicht gelesen werden. Versuch es mit einem JPG- oder PNG-Foto.", true);
+  }
+});
+document.getElementById("tplApply").onclick = () => {
+  if(!tplFound) return;
+  const replace = document.getElementById("tplMode").value === "replace";
+  let n = 0;
+  Object.entries(tplFound).forEach(([ch, v]) => {
+    ensure(ch);
+    if(replace) glyphs[ch] = [v, null, null];
+    else { const slot = glyphs[ch].findIndex(x => !x || !x.s || !x.s.length); glyphs[ch][slot >= 0 ? slot : VARS - 1] = v; }
+    saveGlyph(ch); n++;
+  });
+  tplFound = null;
+  document.getElementById("tplResult").hidden = true;
+  tplMsg(n + " Zeichen übernommen.");
+  buildChips(); loadCells();
+};
+document.getElementById("tplCancel").onclick = () => { tplFound = null; document.getElementById("tplResult").hidden = true; document.getElementById("tplMsg").hidden = true; };
 
 /* ================= Routing & Start ================= */
 function route(){
