@@ -190,6 +190,12 @@ details[open] summary{margin-bottom:10px}
 
       <div class="card">
         <span class="lbl">Seite</span>
+        <div class="two">
+          <div class="ctl"><label for="s-size" style="font-size:.88rem">Blattgröße</label>
+            <select id="s-size"><option value="a4">A4 (210 × 297 mm)</option><option value="a5">A5 (148 × 210 mm)</option><option value="a6">A6 (105 × 148 mm)</option><option value="letter">US Letter</option><option value="gn">GoodNotes Standard</option></select></div>
+          <div class="ctl"><label for="s-orient" style="font-size:.88rem">Ausrichtung</label>
+            <select id="s-orient"><option value="p">Hochformat</option><option value="l">Querformat</option></select></div>
+        </div>
         <div class="ctl"><div class="top"><label for="s-lh">Zeilenabstand <span class="note" id="lhNote"></span></label><output id="o-lh"></output></div><input type="range" id="s-lh" min="5" max="16" step="0.5"></div>
         <label class="check"><input type="checkbox" id="s-auto"> Seite automatisch füllen</label>
         <div class="ctl"><div class="top"><label for="s-ml">Rand links</label><output id="o-ml"></output></div><input type="range" id="s-ml" min="8" max="40" step="1"></div>
@@ -207,7 +213,7 @@ details[open] summary{margin-bottom:10px}
           <button class="btn" id="pdf">PDF</button>
           <button class="btn" id="png">PNG (Seite 1)</button>
         </div>
-        <p class="note"><b>GoodNotes-Datei</b>: Jeder Buchstabe ist echte Kugelschreiber-Tinte, du kannst ihn in GoodNotes radieren und verschieben. Auf iPad und iPhone öffnet sich das Teilen-Menü, dort GoodNotes antippen. Beim ersten Mal lädt der Export ca. 10 MB nach. <b>PDF</b>: A4, Handschrift als Vektor, nicht radierbar.</p>
+        <p class="note"><b>GoodNotes-Datei</b>: Jeder Buchstabe ist echte Kugelschreiber-Tinte, du kannst ihn in GoodNotes radieren und verschieben. Auf iPad und iPhone öffnet sich das Teilen-Menü, dort GoodNotes antippen. Beim ersten Mal lädt der Export ca. 10 MB nach. <b>PDF</b>: Handschrift als Vektor, nicht radierbar.</p>
         <p class="msg" id="exportMsg" hidden></p>
       </div>
 
@@ -256,7 +262,7 @@ const INKS = [
   ["Schwarz", [0.08, 0.08, 0.09]],
   ["Bleistift", [0.33, 0.33, 0.35]]
 ];
-const DEFAULTS = {xh: 0.32, var: 0.35, svar: 0.06, w: 0.75, slant: 0, ls: 0.12, ws: 1.1, lh: 8, auto: true, ml: 20, paper: "lined", ink: 0, seed: 1};
+const DEFAULTS = {xh: 0.32, var: 0.35, svar: 0.06, w: 0.75, slant: 0, ls: 0.12, ws: 1.1, lh: 8, auto: true, ml: 20, paper: "lined", ink: 0, seed: 1, size: "a4", orient: "p"};
 const SAMPLE = "Hier steht dein Text. Zeichne im Bereich „Zeichnen“ deine Buchstaben, dann erscheint alles hier in deiner eigenen Handschrift.\n\nGraue Buchstaben hast du noch nicht gezeichnet.";
 
 let glyphs = {};       // char -> [variation|null]*3, variation = {s:[[x,y,...],...], t}
@@ -343,6 +349,13 @@ function mulberry(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t =
 function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 const MM = 72 / 25.4;
 const PAGE = {w: 210 * MM, h: 297 * MM};
+// Blattgrößen in mm; "gn" = Seitenformat neuer GoodNotes-Standardnotizbücher
+const SIZES = {a4: [210, 297], a5: [148, 210], a6: [105, 148], letter: [215.9, 279.4], gn: [160.53, 207.59]};
+function applySize(){
+  const [w, h] = SIZES[S.size] || SIZES.a4;
+  const land = S.orient === "l";
+  PAGE.w = (land ? h : w) * MM; PAGE.h = (land ? w : h) * MM;
+}
 
 /* ================= Layout ================= */
 const measureCtx = document.createElement("canvas").getContext("2d");
@@ -425,6 +438,7 @@ function layout(str, opts){
 }
 
 function buildPages(){
+  applySize();
   const ml = S.ml * MM, mr = 14 * MM, mt = 18 * MM, mb = 16 * MM;
   const minLh = S.lh * MM;
   const xhPt = S.xh * minLh;
@@ -710,6 +724,8 @@ SL.forEach(([k, fmt]) => {
 });
 document.getElementById("s-auto").addEventListener("change", e => { S.auto = e.target.checked; saveMeta(); schedulePreview(); });
 document.getElementById("s-paper").addEventListener("change", e => { S.paper = e.target.value; saveMeta(); schedulePreview(); });
+document.getElementById("s-size").addEventListener("change", e => { S.size = e.target.value; saveMeta(); schedulePreview(); });
+document.getElementById("s-orient").addEventListener("change", e => { S.orient = e.target.value; saveMeta(); schedulePreview(); });
 document.getElementById("text").addEventListener("input", e => { text = e.target.value; saveMeta(); schedulePreview(); });
 document.getElementById("reroll").onclick = () => { S.seed = (S.seed % 100000) + 1 + Math.floor(Math.random() * 1000); saveMeta(); renderPreview(); };
 function buildInks(){
@@ -726,6 +742,8 @@ function syncControls(){
   SL.forEach(([k, fmt]) => { document.getElementById("s-" + k).value = S[k]; document.getElementById("o-" + k).textContent = fmt(S[k]); });
   document.getElementById("s-auto").checked = !!S.auto;
   document.getElementById("s-paper").value = S.paper;
+  document.getElementById("s-size").value = S.size;
+  document.getElementById("s-orient").value = S.orient;
   document.getElementById("text").value = text;
   buildInks();
 }
