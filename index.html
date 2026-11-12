@@ -126,6 +126,17 @@ details[open] summary{margin-bottom:10px}
 .learn-text{margin:0;max-width:75ch;font-size:.92rem}
 .tpl-result{display:grid;gap:10px}
 #tplPreview{width:100%;max-width:640px;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.tpl-alt summary{cursor:pointer;font-weight:600;font-size:.9rem}
+.tpl-alt[open]{display:grid;gap:10px}
+.free-lines{display:grid;gap:12px}
+.free-list{display:grid;gap:14px;max-height:70vh;overflow-y:auto;padding-right:4px}
+.fl-row{display:grid;gap:6px;min-width:0}
+.fl-row canvas{max-width:100%;height:auto;max-height:90px;object-fit:contain;object-position:left;border:1px solid var(--line);border-radius:6px;background:#fff}
+.fl-row input{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:8px 10px;width:100%}
+.free-tiles{display:flex;flex-wrap:wrap;gap:6px}
+.free-tiles button{padding:0;border:1px solid var(--line);border-radius:8px;background:#fff;position:relative;line-height:0}
+.free-tiles button span{position:absolute;top:3px;left:5px;font-size:10px;line-height:1;color:#7a8190}
+.free-tiles button.off{opacity:.3;box-shadow:0 0 0 2px var(--warn)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -148,13 +159,36 @@ details[open] summary{margin-bottom:10px}
       <div class="bar"><i id="progBar"></i></div>
     </div>
     <section class="learn" aria-label="Aus Foto lernen">
-      <p class="learn-text"><b>Keine Lust, jeden Buchstaben einzeln zu zeichnen?</b> Lade die Vorlage, schreib jedes Zeichen in sein Kästchen (auf Papier oder in GoodNotes) und lad ein Foto davon hoch. Wer die Vorlage zwei- oder dreimal ausfüllt, bekommt mehr Varianten.</p>
+      <p class="learn-text"><b>Keine Lust, jeden Buchstaben einzeln zu zeichnen?</b> Lad ein Foto oder einen Screenshot von irgendetwas Handgeschriebenem hoch, zum Beispiel eine Seite aus GoodNotes. Die App findet die Zeilen, du tippst bei ein paar davon ab, was dort steht, und die Buchstaben werden automatisch ausgeschnitten. Am besten klappt das bei Schrift, in der die Buchstaben nicht zusammenhängen. Bei Schreibschrift liefert die Vorlage deutlich schönere Ergebnisse.</p>
       <div class="row">
-        <button class="btn" id="tplGet">Vorlage (PDF)</button>
-        <label class="btn primary" for="tplFile" style="display:inline-block">Foto hochladen</label>
-        <input type="file" id="tplFile" accept="image/*,application/pdf" hidden>
+        <label class="btn primary" for="freeFile" style="display:inline-block">Bild hochladen</label>
+        <input type="file" id="freeFile" accept="image/*,application/pdf" hidden>
       </div>
+      <details class="tpl-alt">
+        <summary>Genauer: Vorlage ausfüllen</summary>
+        <p class="note">Ein Kästchen pro Zeichen: Vorlage laden, ausfüllen (Papier oder GoodNotes), fotografieren, hochladen. Kein Abtippen nötig, alle Zeichen auf einmal.</p>
+        <div class="row">
+          <button class="btn" id="tplGet">Vorlage (PDF)</button>
+          <label class="btn" for="tplFile" style="display:inline-block">Ausgefüllte Vorlage hochladen</label>
+          <input type="file" id="tplFile" accept="image/*,application/pdf" hidden>
+        </div>
+      </details>
       <p class="msg" id="tplMsg" hidden></p>
+      <div id="freeLines" class="free-lines" hidden>
+        <div id="freeList" class="free-list"></div>
+        <div class="row">
+          <button class="btn primary" id="freeCut">Buchstaben ausschneiden</button>
+          <button class="btn" id="freeCancel">Verwerfen</button>
+        </div>
+      </div>
+      <div id="freeResult" class="tpl-result" hidden>
+        <div id="freeTiles" class="free-tiles"></div>
+        <div class="row">
+          <select id="freeMode" style="width:auto"><option value="add">Als weitere Variante hinzufügen</option><option value="replace">Vorhandene Zeichen ersetzen</option></select>
+          <button class="btn primary" id="freeApply">Übernehmen</button>
+          <button class="btn" id="freeBack">Zurück zu den Zeilen</button>
+        </div>
+      </div>
       <div id="tplResult" class="tpl-result" hidden>
         <canvas id="tplPreview" aria-label="Erkannte Zeichen"></canvas>
         <div class="row">
@@ -1304,6 +1338,345 @@ document.getElementById("tplApply").onclick = () => {
   buildChips(); loadCells();
 };
 document.getElementById("tplCancel").onclick = () => { tplFound = null; document.getElementById("tplResult").hidden = true; document.getElementById("tplMsg").hidden = true; };
+
+/* ================= Aus beliebigem Bild lernen ================= */
+let freeData = null, freeGlyphs = null;
+const SMALL_CH = "acemnorsuvwxz";
+
+function inkMask(img){
+  const {g, W, H} = img, T = 48, tw = Math.ceil(W / T), th = Math.ceil(H / T), bg = new Uint8Array(tw * th);
+  for(let ty = 0; ty < th; ty++) for(let tx = 0; tx < tw; tx++){
+    const v = [];
+    for(let y = ty * T; y < Math.min(H, ty * T + T); y += 2) for(let x = tx * T; x < Math.min(W, tx * T + T); x += 2) v.push(g[y * W + x]);
+    v.sort((a, b) => a - b); bg[ty * tw + tx] = v[Math.floor(v.length * 0.85)];
+  }
+  const m = new Uint8Array(W * H);
+  for(let y = 0; y < H; y++){
+    const row = Math.floor(y / T) * tw;
+    for(let x = 0; x < W; x++){ const b = bg[row + Math.floor(x / T)], v = g[y * W + x]; if(v < Math.min(b * 0.8, 175) && b - v > 40) m[y * W + x] = 1; }
+  }
+  return m;
+}
+function labelComps(m, W, H){
+  const lab = new Int32Array(W * H), comps = [null], st = [];
+  for(let s = 0; s < W * H; s++){
+    if(!m[s] || lab[s]) continue;
+    const id = comps.length; let n = 0, x0 = W, x1 = 0, y0 = H, y1 = 0;
+    lab[s] = id; st.push(s);
+    while(st.length){
+      const p = st.pop(), px = p % W, py = (p - px) / W; n++;
+      if(px < x0) x0 = px; if(px > x1) x1 = px; if(py < y0) y0 = py; if(py > y1) y1 = py;
+      for(const [dx, dy] of N8){ const X = px + dx, Y = py + dy; if(X < 0 || Y < 0 || X >= W || Y >= H) continue; const q = Y * W + X; if(m[q] && !lab[q]){ lab[q] = id; st.push(q); } }
+    }
+    comps.push({id, n, x0, x1, y0, y1, w: x1 - x0 + 1, h: y1 - y0 + 1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2});
+  }
+  return {lab, comps};
+}
+const median = a => { if(!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+function findLines(img){
+  const m = inkMask(img), {lab, comps} = labelComps(m, img.W, img.H);
+  let cs = comps.filter(c => c && c.n >= 5);
+  const hmed = median(cs.filter(c => c.n >= 30).map(c => c.h)) || 20;
+  cs = cs.filter(c => !(c.h > 3.5 * hmed || c.w > 15 * hmed || (c.h > 2.5 * hmed && c.w > 2.5 * hmed) || (c.w > 6 * hmed && c.h < 0.5 * hmed)));
+  const main = cs.filter(c => c.h >= 0.45 * hmed).sort((a, b) => a.cy - b.cy), small = cs.filter(c => c.h < 0.45 * hmed);
+  const lines = [];
+  main.forEach(c => {
+    let best = null, bd = 1e9;
+    lines.forEach(L => { const d = Math.abs(c.cy - L.cy); if(d < 0.6 * hmed && d < bd){ bd = d; best = L; } });
+    if(!best){ best = {comps: [], cy: c.cy, sum: 0}; lines.push(best); }
+    best.comps.push(c); best.sum += c.cy; best.cy = best.sum / best.comps.length;
+  });
+  // Teilzeilen zusammenführen (schräge Zeilen, Ober- und Unterlängen)
+  lines.forEach(L => L.cy = median(L.comps.map(c => c.cy)));
+  lines.sort((a, b) => a.cy - b.cy);
+  for(let i = 0; i < lines.length - 1; i++){
+    const a = lines[i], b = lines[i + 1];
+    if(b.cy - a.cy < 0.75 * hmed){ a.comps.push(...b.comps); a.cy = median(a.comps.map(c => c.cy)); lines.splice(i + 1, 1); i--; }
+  }
+  let ls = lines.filter(L => L.comps.length >= 2).map(L => {
+    const b = {comps: L.comps, x0: Math.min(...L.comps.map(c => c.x0)), x1: Math.max(...L.comps.map(c => c.x1)), y0: Math.min(...L.comps.map(c => c.y0)), y1: Math.max(...L.comps.map(c => c.y1)), cy: L.cy};
+    return b;
+  });
+  small.forEach(c => {
+    let best = null, bd = 1e9;
+    ls.forEach(L => {
+      if(c.cx < L.x0 - hmed || c.cx > L.x1 + hmed) return;
+      const d = c.cy < L.y0 ? L.y0 - c.cy : c.cy > L.y1 ? (c.cy - L.y1) * 2 : 0;
+      if(d < bd){ bd = d; best = L; }
+    });
+    if(best && bd < 1.2 * hmed) best.comps.push(c);
+  });
+  ls.sort((a, b) => a.y0 - b.y0);
+  return {img, lab, hmed, lines: ls.slice(0, 60)};
+}
+
+/* ---- Zeile in Buchstaben zerlegen ---- */
+function candOf(members){
+  return {members, set: new Set(members.map(c => c.id)), x0: Math.min(...members.map(c => c.x0)), x1: Math.max(...members.map(c => c.x1)), y0: Math.min(...members.map(c => c.y0)), y1: Math.max(...members.map(c => c.y1)), xa: -Infinity, xb: Infinity};
+}
+function lineCandidates(L, hmed){
+  const cs = [...L.comps].sort((a, b) => a.x0 - b.x0), par = cs.map((_, i) => i);
+  const f = i => par[i] === i ? i : (par[i] = f(par[i]));
+  for(let i = 0; i < cs.length; i++) for(let j = i + 1; j < cs.length; j++){
+    const a = cs[i], b = cs[j];
+    if(b.x0 > a.x1 + hmed) break;
+    const ov = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+    const sm = a.h < 0.45 * hmed ? a : b.h < 0.45 * hmed ? b : null, other = sm === a ? b : a;
+    if(ov >= 0.5 * Math.min(a.w, b.w) || (sm && sm.cx >= other.x0 - 2 && sm.cx <= other.x1 + 2)) par[f(j)] = f(i);
+  }
+  const groups = {};
+  cs.forEach((c, i) => (groups[f(i)] = groups[f(i)] || []).push(c));
+  return Object.values(groups).map(candOf).sort((a, b) => a.x0 - b.x0);
+}
+function eachPixel(fd, c, cb){
+  const {lab, img} = fd, W = img.W;
+  for(let y = c.y0; y <= c.y1; y++) for(let x = Math.max(c.x0, c.xa); x <= Math.min(c.x1, c.xb - 1); x++){ if(c.set.has(lab[y * W + x])) cb(x, y); }
+}
+function tightBox(fd, c){
+  let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+  eachPixel(fd, c, (x, y) => { if(x < x0) x0 = x; if(x > x1) x1 = x; if(y < y0) y0 = y; if(y > y1) y1 = y; });
+  if(x1 < 0) return null;
+  return {...c, x0, x1, y0, y1};
+}
+function splitCand(fd, c){
+  const w = c.x1 - c.x0 + 1; if(w < 6) return null;
+  const col = new Array(w).fill(0);
+  eachPixel(fd, c, x => col[x - c.x0]++);
+  let cut = -1, best = 1e9;
+  for(let i = Math.floor(w * 0.3); i <= Math.ceil(w * 0.7); i++){ const v = col[i] + (col[i - 1] || 0) + (col[i + 1] || 0); if(v < best){ best = v; cut = i; } }
+  const xc = c.x0 + cut;
+  const a = tightBox(fd, {...c, xa: Math.max(c.xa, c.x0), xb: xc}), b = tightBox(fd, {...c, xa: xc, xb: Math.min(c.xb, c.x1 + 1)});
+  return a && b ? [a, b] : null;
+}
+function mergeCand(a, b){
+  const m = candOf(a.members.concat(b.members));
+  m.xa = Math.min(a.xa, b.xa); m.xb = Math.max(a.xb, b.xb);
+  if(isFinite(m.xa) || isFinite(m.xb)){ m.x0 = Math.max(m.x0, m.xa); m.x1 = Math.min(m.x1, m.xb - 1); }
+  return m;
+}
+function letterWeight(ch){
+  if("il.,;:!'|".includes(ch)) return 0.45;
+  if("jtfrI1()[]".includes(ch)) return 0.65;
+  if("mwMW".includes(ch)) return 1.55;
+  if(ch >= "A" && ch <= "Z" || "ÄÖÜ".includes(ch)) return 1.2;
+  return 1;
+}
+function segmentByProfile(fd, c, letters){
+  const w = c.x1 - c.x0 + 1, col = new Float32Array(w);
+  eachPixel(fd, c, x => col[x - c.x0]++);
+  const sm = Array.from(col, (v, i) => (col[i - 1] || 0) * 0.25 + v * 0.5 + (col[i + 1] || 0) * 0.25);
+  const ws = letters.map(letterWeight), tot = ws.reduce((a, b) => a + b, 0), avg = w / letters.length;
+  const cuts = []; let acc = 0, prev = 0;
+  for(let k = 0; k < letters.length - 1; k++){
+    acc += ws[k];
+    const e = Math.round(acc / tot * w), r = Math.max(2, Math.round(avg * 0.35));
+    let best = e, bv = 1e9;
+    for(let x = Math.max(prev + 2, e - r); x <= Math.min(w - 2, e + r); x++){ const v = sm[x] + Math.abs(x - e) * 0.08; if(v < bv){ bv = v; best = x; } }
+    cuts.push(best); prev = best;
+  }
+  const bounds = [0, ...cuts, w], out = [];
+  for(let k = 0; k < letters.length; k++){
+    const g = tightBox(fd, {...c, xa: c.x0 + bounds[k], xb: c.x0 + bounds[k + 1]});
+    if(!g) return null;
+    out.push({...g, ch: letters[k], split: true});
+  }
+  return out;
+}
+function alignWord(fd, C, letters){
+  C = C.slice();
+  if(!C.length) return null;
+  while(C.length > letters.length){
+    let bi = 0, bg = 1e9;
+    for(let i = 0; i < C.length - 1; i++){ const g = C[i + 1].x0 - C[i].x1; if(g < bg){ bg = g; bi = i; } }
+    C.splice(bi, 2, mergeCand(C[bi], C[bi + 1]));
+  }
+  if(C.length === letters.length) return C.map((c, i) => ({...c, ch: letters[i], split: false}));
+  // Weniger Teile als Buchstaben: jedes zusammenhängende Teil nach Breite auf Buchstaben verteilen
+  const ww = C.map(c => c.x1 - c.x0 + 1), tw = ww.reduce((a, b) => a + b, 0);
+  const lw = letters.map(letterWeight), ltot = lw.reduce((a, b) => a + b, 0);
+  const counts = []; let li = 0, accW = 0;
+  for(let i = 0; i < C.length; i++){
+    accW += ww[i];
+    const target = i === C.length - 1 ? letters.length : (() => { let a = 0, k = 0; while(k < letters.length && (a + lw[k] / 2) / ltot * tw < accW){ a += lw[k]; k++; } return Math.max(li + 1, Math.min(k, letters.length - (C.length - 1 - i))); })();
+    counts.push(target - li); li = target;
+  }
+  const out = []; let p = 0;
+  for(let i = 0; i < C.length; i++){
+    const ls = letters.slice(p, p + counts[i]); p += counts[i];
+    if(ls.length === 1){ out.push({...C[i], ch: ls[0], split: false}); continue; }
+    const seg = segmentByProfile(fd, C[i], ls);
+    if(!seg) return null;
+    out.push(...seg);
+  }
+  return out.length === letters.length ? out : null;
+}
+function splitWords(C, ws, hmed){
+  // Kandidaten so auf Wörter verteilen, dass Lücken groß sind und Wortbreiten zur Buchstabenzahl passen
+  const n = C.length, W = ws.length;
+  if(W === 1) return [C];
+  const gap = i => C[i + 1].x0 - C[i].x1;
+  const inkW = C.reduce((a, c) => a + (c.x1 - c.x0 + 1), 0);
+  const wt = ws.map(w => w.reduce((a, ch) => a + letterWeight(ch), 0)), unit = inkW / wt.reduce((a, b) => a + b, 0);
+  const gs = C.slice(0, -1).map((_, i) => gap(i)), gmed = median(gs.map(g => Math.max(0, g))) || 1;
+  const width = (a, b) => C[b].x1 - C[a].x0 + 1;
+  const cost = (a, b, k) => { const r = width(a, b) / Math.max(1, wt[k] * unit); return 6 * Math.abs(Math.log(r)); };
+  const INF = 1e18, dp = Array.from({length: W + 1}, () => new Float64Array(n + 1).fill(INF)), back = Array.from({length: W + 1}, () => new Int32Array(n + 1));
+  dp[0][0] = 0;
+  for(let k = 1; k <= W; k++) for(let j = k; j <= n - (W - k); j++) for(let i = k - 1; i < j; i++){
+    if(dp[k - 1][i] >= INF) continue;
+    const bonus = i > 0 ? Math.max(-4, Math.min(6, (gap(i - 1) - gmed) / (0.25 * hmed))) : 0;
+    const v = dp[k - 1][i] + cost(i, j - 1, k - 1) - bonus;
+    if(v < dp[k][j]){ dp[k][j] = v; back[k][j] = i; }
+  }
+  const out = []; let j = n;
+  for(let k = W; k >= 1; k--){ const i = back[k][j]; out.unshift(C.slice(i, j)); j = i; }
+  return out;
+}
+function segmentLine(fd, L, text){
+  const words = text.trim().split(/\s+/).filter(Boolean).map(w => [...w].filter(ch => ALL.includes(ch)));
+  const ws = words.filter(w => w.length);
+  if(!ws.length) return {ok: false, why: "leer"};
+  const C = lineCandidates(L, fd.hmed);
+  if(C.length < ws.length) return {ok: false, why: "Weniger Wörter im Bild als im Text."};
+  const groups = splitWords(C, ws, fd.hmed);
+  const out = [];
+  for(let k = 0; k < ws.length; k++){
+    const a = alignWord(fd, groups[k], ws[k]);
+    if(a) out.push(...a);
+  }
+  if(!out.length) return {ok: false, why: "Buchstaben passten nicht zum Text."};
+  const sm = out.filter(g => SMALL_CH.includes(g.ch));
+  const base = sm.length ? median(sm.map(g => g.y1 + 1)) : median(out.map(g => g.y1 + 1));
+  const xh = sm.length ? median(sm.map(g => g.y1 - g.y0 + 1)) : fd.hmed * 0.6;
+  return {ok: true, glyphs: out.map(g => ({g, base, xh}))};
+}
+function glyphVariant(fd, g, base, xh){
+  const pad = 2, bx = g.x0 - pad, by = g.y0 - pad, w = g.x1 - g.x0 + 1 + 2 * pad, h = g.y1 - g.y0 + 1 + 2 * pad;
+  if(w * h > 400000) return null;
+  const m = new Uint8Array(w * h);
+  eachPixel(fd, g, (x, y) => { m[(y - by) * w + (x - bx)] = 1; });
+  const dil = new Uint8Array(w * h);
+  for(let y = 1; y < h - 1; y++) for(let x = 1; x < w - 1; x++){ let on = m[y * w + x]; if(!on) for(const [dx, dy] of N8) if(m[(y + dy) * w + x + dx]){ on = 1; break; } dil[y * w + x] = on; }
+  const ero = new Uint8Array(w * h);
+  for(let y = 1; y < h - 1; y++) for(let x = 1; x < w - 1; x++){ let all = dil[y * w + x]; if(all) for(const [dx, dy] of N8) if(!dil[(y + dy) * w + x + dx]){ all = 0; break; } ero[y * w + x] = all; }
+  thin(ero, w, h);
+  const k = 250 / Math.max(4, xh);
+  const eps = Math.max(0.35, Math.min(0.9, xh * 0.025));
+  const strokes = tracePaths(ero, w, h).map(p => smooth(rdp(p, eps))).map(p => {
+    const o = []; p.forEach(([x, y]) => o.push(Math.round((x + bx - g.x0) * k + 150), Math.round(700 + (y + by - base) * k))); return o;
+  });
+  return strokes.length ? {s: strokes} : null;
+}
+
+/* ---- Oberfläche ---- */
+function grayCrop(fd, x0, y0, x1, y1, maxW){
+  const {g, W} = fd.img, w = x1 - x0 + 1, h = y1 - y0 + 1, sc = Math.min(1, maxW / w);
+  const cv = document.createElement("canvas"); cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(h * sc));
+  const full = document.createElement("canvas"); full.width = w; full.height = h;
+  const fx = full.getContext("2d"), id = fx.createImageData(w, h);
+  for(let y = 0; y < h; y++) for(let x = 0; x < w; x++){ const v = g[(y0 + y) * W + x0 + x], o = (y * w + x) * 4; id.data[o] = id.data[o + 1] = id.data[o + 2] = v; id.data[o + 3] = 255; }
+  fx.putImageData(id, 0, 0);
+  cv.getContext("2d").drawImage(full, 0, 0, cv.width, cv.height);
+  return cv;
+}
+function showFreeLines(){
+  const list = document.getElementById("freeList"); list.innerHTML = "";
+  freeData.lines.forEach((L, i) => {
+    const row = document.createElement("div"); row.className = "fl-row"; row.dataset.cy = Math.round((L.y0 + L.y1) / 2 / freeData.img.H * 1000);
+    const p = Math.round(freeData.hmed * 0.5);
+    const cv = grayCrop(freeData, Math.max(0, L.x0 - p), Math.max(0, L.y0 - p), Math.min(freeData.img.W - 1, L.x1 + p), Math.min(freeData.img.H - 1, L.y1 + p), 1400);
+    cv.setAttribute("aria-hidden", "true");
+    const inp = document.createElement("input"); inp.type = "text"; inp.id = "freeT-" + i; inp.placeholder = "Was steht in Zeile " + (i + 1) + "?";
+    inp.autocomplete = "off"; inp.setAttribute("autocapitalize", "off"); inp.spellcheck = false;
+    const note = document.createElement("span"); note.className = "note"; note.id = "freeN-" + i;
+    row.append(cv, inp, note); list.appendChild(row);
+  });
+  document.getElementById("freeLines").hidden = false;
+}
+function showFreeTiles(){
+  const host = document.getElementById("freeTiles"); host.innerHTML = "";
+  const order = [...freeGlyphs].sort((a, b) => ALL.indexOf(a.ch) - ALL.indexOf(b.ch));
+  order.forEach(item => {
+    const b = document.createElement("button"); b.type = "button"; b.title = item.ch;
+    b.setAttribute("aria-pressed", "true"); b.setAttribute("aria-label", item.ch);
+    const cv = document.createElement("canvas"), cs = 56, dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = cs * dpr; cv.height = cs * dpr; cv.style.width = cs + "px"; cv.style.height = cs + "px";
+    const x = cv.getContext("2d"); x.scale(dpr, dpr); x.fillStyle = "#fff"; x.fillRect(0, 0, cs, cs);
+    x.strokeStyle = "#c7d4f5"; x.beginPath(); x.moveTo(0, cs * 0.7); x.lineTo(cs, cs * 0.7); x.stroke();
+    let minX = 1e9, maxX = -1e9; item.v.s.forEach(st => { for(let i = 0; i < st.length; i += 2){ minX = Math.min(minX, st[i]); maxX = Math.max(maxX, st[i]); } });
+    const ox = (cs - (maxX - minX) * cs / 1000) / 2 - minX * cs / 1000;
+    x.strokeStyle = "#1b2130"; x.lineWidth = 1.4; x.lineCap = "round"; x.lineJoin = "round";
+    item.v.s.forEach(st => { pathFlat(x, st, ox, 0, cs / 1000); x.stroke(); });
+    const lb = document.createElement("span"); lb.textContent = item.ch;
+    b.append(cv, lb);
+    if(item.off){ b.classList.add("off"); b.setAttribute("aria-pressed", "false"); }
+    b.onclick = () => { item.off = !item.off; b.classList.toggle("off", item.off); b.setAttribute("aria-pressed", String(!item.off)); };
+    host.appendChild(b);
+  });
+}
+document.getElementById("freeFile").addEventListener("change", async e => {
+  const f = e.target.files[0]; e.target.value = ""; if(!f) return;
+  ["freeLines", "freeResult", "tplResult"].forEach(id => document.getElementById(id).hidden = true);
+  tplMsg("Bild wird ausgewertet …");
+  try{
+    const img = await fileToGray(f);
+    freeData = findLines(img);
+    if(!freeData.lines.length){ tplMsg("Auf dem Bild wurde keine Schrift gefunden. Nimm ein schärferes Foto oder einen Screenshot.", true); return; }
+    showFreeLines();
+    tplMsg(freeData.lines.length + " Zeilen gefunden. Tippe bei ein paar davon genau ab, was dort steht, und tippe dann auf „Buchstaben ausschneiden“.");
+  }catch(err){ console.error(err); tplMsg("Die Datei konnte nicht gelesen werden. Versuch es mit einem JPG- oder PNG-Bild.", true); }
+});
+document.getElementById("freeCut").onclick = () => {
+  if(!freeData) return;
+  const out = []; let used = 0;
+  freeData.lines.forEach((L, i) => {
+    const t = document.getElementById("freeT-" + i).value, note = document.getElementById("freeN-" + i);
+    note.textContent = "";
+    if(!t.trim()) return;
+    used++;
+    const r = segmentLine(freeData, L, t);
+    if(!r.ok){ note.textContent = r.why + " Prüf den Text dieser Zeile."; return; }
+    let n = 0;
+    const unitOf = gs => median(gs.map(({g}) => (g.x1 - g.x0 + 1) / letterWeight(g.ch)));
+    const whole = r.glyphs.filter(({g}) => !g.split), unit = whole.length >= 3 ? unitOf(whole) : unitOf(r.glyphs);
+    r.glyphs.forEach(({g, base, xh}) => {
+      const v = glyphVariant(freeData, g, base, xh); if(!v) return;
+      const ratio = (g.x1 - g.x0 + 1) / (letterWeight(g.ch) * unit);
+      const sure = !g.split || (ratio > 0.6 && ratio < 1.7);
+      out.push({ch: g.ch, v, off: !sure, split: !!g.split}); n++;
+    });
+    note.textContent = n + " Buchstaben ausgeschnitten.";
+  });
+  if(!used){ tplMsg("Tippe zuerst bei mindestens einer Zeile ab, was dort steht.", true); return; }
+  if(!out.length){ tplMsg("Es konnten keine Buchstaben ausgeschnitten werden. Prüf, ob der Text genau zur Zeile passt.", true); return; }
+  freeGlyphs = out;
+  showFreeTiles();
+  document.getElementById("freeLines").hidden = true;
+  document.getElementById("freeResult").hidden = false;
+  const chars = new Set(out.map(o => o.ch));
+  const unsure = out.filter(o => o.off).length;
+  tplMsg(out.length + " Buchstaben ausgeschnitten (" + chars.size + " verschiedene Zeichen)." + (unsure ? " " + unsure + " unsichere sind blass und werden nicht übernommen, tippe sie an, wenn sie doch passen." : "") + " Tippe falsche an, um sie wegzulassen.");
+};
+document.getElementById("freeBack").onclick = () => { document.getElementById("freeResult").hidden = true; document.getElementById("freeLines").hidden = false; };
+document.getElementById("freeCancel").onclick = () => { freeData = null; document.getElementById("freeLines").hidden = true; document.getElementById("tplMsg").hidden = true; };
+document.getElementById("freeApply").onclick = () => {
+  if(!freeGlyphs) return;
+  const replace = document.getElementById("freeMode").value === "replace", by = {};
+  freeGlyphs.filter(o => !o.off).sort((a, b) => a.split - b.split).forEach(o => (by[o.ch] = by[o.ch] || []).push(o.v));
+  let n = 0, skipped = 0;
+  Object.entries(by).forEach(([ch, vs]) => {
+    ensure(ch);
+    if(replace){ glyphs[ch] = [vs[0] || null, vs[1] || null, vs[2] || null]; n += Math.min(3, vs.length); }
+    else vs.forEach(v => { const slot = glyphs[ch].findIndex(x => !x || !x.s || !x.s.length); if(slot >= 0){ glyphs[ch][slot] = v; n++; } else skipped++; });
+    saveGlyph(ch);
+  });
+  freeGlyphs = null; freeData = null;
+  document.getElementById("freeResult").hidden = true;
+  const missing = ALL.filter(ch => !hasAny(ch));
+  tplMsg(n + " Varianten übernommen" + (skipped ? " (" + skipped + " übersprungen, weil schon 3 Varianten da waren)" : "") + ". " + (missing.length ? "Noch offen: " + missing.slice(0, 30).join(" ") + (missing.length > 30 ? " …" : "") : "Alle Zeichen sind da."));
+  buildChips(); loadCells();
+};
 
 /* ================= Routing & Start ================= */
 function route(){
